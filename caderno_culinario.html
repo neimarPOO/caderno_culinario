@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -414,15 +414,19 @@
             padding: 0;
         }
 
-        .ingrediente-item, .tag-item {
+        .ingrediente-item {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr auto;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .tag-item {
             display: flex;
             align-items: center;
             gap: 10px;
             margin-bottom: 10px;
-        }
-        
-        .ingrediente-item input {
-            flex-grow: 1;
         }
 
         /* Detalhes do Prato */
@@ -681,7 +685,7 @@
                     <input type="text" id="categoria">
                 </div>
                 <div class="form-group">
-                    <label>Ingredientes (<small>Nome, Quantidade, Validade</small>)</label>
+                    <label>Ingredientes</label>
                     <ul id="ingredientes-list"></ul>
                     <button type="button" class="btn btn-secundario" id="btn-add-ingrediente">Adicionar Ingrediente</button>
                 </div>
@@ -766,6 +770,8 @@
         const imageUploadInput = document.getElementById('image-upload');
         const imagePreview = document.getElementById('image-preview');
         const btnCaptureImage = document.getElementById('btn-capture-image');
+        const btnAddIngrediente = document.getElementById('btn-add-ingrediente');
+        const ingredientesList = document.getElementById('ingredientes-list');
 
         const DB_KEY = 'cookbook_app_db';
         const emptyDB = {
@@ -950,10 +956,42 @@
                 showModal(id);
             });
 
+            viewDetails.querySelector('#btn-delete-recipe-view').addEventListener('click', () => {
+                if (confirm(`Tem certeza que deseja excluir o prato "${recipe.nome}"?`)) {
+                    db.pratos = db.pratos.filter(r => r.id !== recipe.id);
+                    saveDB(db);
+                    hideAllModals();
+                    renderRecipeCards(db.pratos, recipesGrid);
+                    updateStatusBar();
+                }
+            });
+
             viewModal.classList.add('active');
         }
 
+        function addIngredienteItem(ingrediente = { nome: '', quantidade: '', validade: '' }) {
+            const li = document.createElement('li');
+            li.className = 'ingrediente-item';
+            li.innerHTML = `
+                <input type="text" class="ingrediente-nome" placeholder="Nome do Ingrediente" value="${ingrediente.nome}" required>
+                <input type="text" class="ingrediente-quantidade" placeholder="Quantidade" value="${ingrediente.quantidade}">
+                <input type="date" class="ingrediente-validade" value="${ingrediente.validade}">
+                <button type="button" class="btn-icon btn-delete remove-ingrediente-btn"><i class="fas fa-trash"></i></button>
+            `;
+            ingredientesList.appendChild(li);
+
+            li.querySelector('.remove-ingrediente-btn').addEventListener('click', () => {
+                li.remove();
+            });
+        }
+
         function showModal(id = null) {
+            form.reset();
+            ingredientesList.innerHTML = '';
+            document.getElementById('recipe-id').value = '';
+            currentImages = [];
+            renderImagePreviews();
+
             if (id) {
                 const recipe = db.pratos.find(r => r.id === id);
                 if (!recipe) return;
@@ -966,13 +1004,15 @@
                 document.getElementById('dificuldade').value = recipe.dificuldade;
                 document.getElementById('tempo-preparo').value = recipe.tempo_preparo;
                 document.getElementById('rendimento').value = recipe.rendimento;
-                currentImages = [...recipe.imagens];
+                
+                if (recipe.ingredientes) {
+                    recipe.ingredientes.forEach(ing => addIngredienteItem(ing));
+                }
+
+                currentImages = [...(recipe.imagens || [])];
                 renderImagePreviews();
             } else {
-                form.reset();
-                document.getElementById('recipe-id').value = '';
-                currentImages = [];
-                renderImagePreviews();
+                addIngredienteItem();
             }
             modal.classList.add('active');
         }
@@ -984,6 +1024,7 @@
 
         btnAddRecipe.addEventListener('click', () => showModal());
         btnMobileAddRecipe.addEventListener('click', () => showModal());
+        btnAddIngrediente.addEventListener('click', () => addIngredienteItem());
         btnCancelEdit.addEventListener('click', hideAllModals);
         modalClose.addEventListener('click', hideAllModals);
         viewModalClose.addEventListener('click', hideAllModals);
@@ -1039,16 +1080,100 @@
             }
         });
 
+        function updateStatusBar() {
+            const totalPratos = db.pratos.length;
+            document.getElementById('total-pratos').textContent = totalPratos;
+
+            let vencendoCount = 0;
+            let vencidosCount = 0;
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0); // Normalize to start of day
+            const seteDias = new Date();
+            seteDias.setDate(hoje.getDate() + 7);
+
+            const ingredientesVencendo = [];
+            const ingredientesVencidos = [];
+
+            db.pratos.forEach(prato => {
+                if (prato.ingredientes) {
+                    prato.ingredientes.forEach(ing => {
+                        if (ing.validade) {
+                            const validadeDate = new Date(ing.validade);
+                            if (validadeDate < hoje) {
+                                vencidosCount++;
+                                ingredientesVencidos.push({ prato, ing });
+                            } else if (validadeDate <= seteDias) {
+                                vencendoCount++;
+                                ingredientesVencendo.push({ prato, ing });
+                            }
+                        }
+                    });
+                }
+            });
+
+            document.getElementById('ingredientes-vencendo-7-dias').textContent = vencendoCount;
+            document.getElementById('ingredientes-vencidos').textContent = vencidosCount;
+            
+            window.ingredientesVencendo = ingredientesVencendo;
+            window.ingredientesVencidos = ingredientesVencidos;
+        }
+
+        const btnVencendo = document.getElementById('btn-vencendo');
+        const btnVencidos = document.getElementById('btn-vencidos');
+        const validadeModal = document.getElementById('validade-modal');
+        const validadeModalClose = validadeModal.querySelector('.modal-close');
+        const validadeList = document.getElementById('validade-list');
+        const validadeModalTitle = document.getElementById('validade-modal-title');
+
+        function showValidadeModal(tipo) {
+            const isVencidos = tipo === 'vencidos';
+            const title = isVencidos ? 'Ingredientes Vencidos' : 'Ingredientes Vencendo em 7 Dias';
+            const list = isVencidos ? window.ingredientesVencidos : window.ingredientesVencendo;
+            
+            validadeModalTitle.textContent = title;
+            validadeList.innerHTML = '';
+
+            if (list.length === 0) {
+                validadeList.innerHTML = '<li>Nenhum ingrediente encontrado.</li>';
+            } else {
+                list.forEach(item => {
+                    const li = document.createElement('li');
+                    const validade = new Date(item.ing.validade).toLocaleDateString();
+                    li.innerHTML = `<strong>${item.ing.nome}</strong> (Prato: ${item.prato.nome}) - Vence em: ${validade}`;
+                    validadeList.appendChild(li);
+                });
+            }
+            validadeModal.classList.add('active');
+        }
+
+        btnVencendo.addEventListener('click', () => showValidadeModal('vencendo'));
+        btnVencidos.addEventListener('click', () => showValidadeModal('vencidos'));
+        validadeModalClose.addEventListener('click', () => {
+            validadeModal.classList.remove('active');
+        });
+
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             
             const id = document.getElementById('recipe-id').value || createUUID();
             
+            const ingredientes = [];
+            document.querySelectorAll('#ingredientes-list .ingrediente-item').forEach(item => {
+                const nome = item.querySelector('.ingrediente-nome').value;
+                if (nome) { // Only save ingredients that have a name
+                    ingredientes.push({
+                        nome: nome,
+                        quantidade: item.querySelector('.ingrediente-quantidade').value,
+                        validade: item.querySelector('.ingrediente-validade').value
+                    });
+                }
+            });
+
             const newRecipe = {
                 id,
                 nome: document.getElementById('nome').value,
                 categoria: document.getElementById('categoria').value,
-                ingredientes: [],
+                ingredientes: ingredientes,
                 preparo: document.getElementById('preparo').value,
                 anotacoes: document.getElementById('anotacoes').value,
                 imagens: currentImages,
@@ -1071,9 +1196,11 @@
             saveDB(db);
             hideAllModals();
             renderRecipeCards(db.pratos, recipesGrid);
+            updateStatusBar();
         });
 
         renderRecipeCards(db.pratos, recipesGrid);
+        updateStatusBar();
     </script>
 </body>
 </html>
